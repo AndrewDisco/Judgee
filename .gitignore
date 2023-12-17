@@ -1,0 +1,7 @@
+# Ignore everything
+*
+
+!main.py
+!readme.md
+!.gitignore
+!icon.png
