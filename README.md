@@ -8,6 +8,10 @@ Judgee is a sophisticated tool designed to aid competitive programmers in verify
 
 ## Features
 
+<p align="center">
+  <img src="https://i.postimg.cc/8CHrbScy/judgee-Showcase.gif" alt="Judgee Showcase">
+</p>
+
 - **C++ Code Verification**: The main feature of Judgee is the ability to verify C++ code. Users can paste their code into the application, and Judgee will compile and run the code against a set of test cases.
 
 - **Mass Check**: This feature allows users to check their code against multiple test cases at once. The test cases should be stored in `.in` and `.ok` files in a selected directory.
