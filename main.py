@@ -497,7 +497,7 @@ class CPPCheckerApp(QWidget):
         
         cpp_code = cpp_code.replace(read_line, "")
         cpp_code = cpp_code.replace(output_line, "")
-        cpp_code = f'#define cin {read_variable}\n#define cout {output_variable}\n' + cpp_code
+        cpp_code = f'#define {read_variable} cin\n#define {output_variable} cout\n' + cpp_code
         self.code_text.setPlainText(cpp_code)
         self.highlighter = CppSyntaxHighlighter(self.code_text.document())
 
