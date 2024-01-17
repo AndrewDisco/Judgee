@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QTextEdit, QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox, QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QHBoxLayout, QPlainTextEdit
+from PyQt5.QtWidgets import *
 from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextBlockUserData, QColor, QFont, QPainter, QTextFormat
 from PyQt5.QtCore import Qt, pyqtSlot, QRegularExpression, QRect
 from PyQt5 import QtGui
@@ -7,6 +7,13 @@ import subprocess
 import time
 import os
 import qdarktheme
+from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
+
+RUNTIME = 2.0 # 2s by default
+RUNTIME_MULTIPLIER = 1.0 # 1x by default
+
+VERSION = "0.5"
  
 class QCodeEditor(QPlainTextEdit):
     class NumberBar(QWidget):
@@ -108,9 +115,7 @@ class QCodeEditor(QPlainTextEdit):
         if SyntaxHighlighter is not None: # add highlighter to textdocument
            self.highlighter = SyntaxHighlighter(self.document())         
                  
-    def resizeEvent(self, *e):
-        '''overload resizeEvent handler'''
-                
+    def resizeEvent(self, *e):              
         if self.DISPLAY_LINE_NUMBERS:   # resize number_bar widget
             cr = self.contentsRect()
             rec = QRect(cr.left(), cr.top(), self.number_bar.getWidth(), cr.height())
@@ -231,11 +236,28 @@ class CppSyntaxHighlighter(QSyntaxHighlighter):
 class CPPCheckerApp(QWidget):
     def __init__(self):
         super().__init__()
-
+        
         self.initUI()
 
     def initUI(self):
         layout = QVBoxLayout()
+
+        menubar = QMenuBar()
+        preferences_menu = menubar.addMenu("Preferences")
+        runtimeAction = QAction("Runtime", self)
+        viewAction = QAction("View", self)
+        runtimeMultiplierAction = QAction("Runtime Multiplier", self)
+
+        preferences_menu.addAction(runtimeAction)
+        runtimeAction.triggered.connect(self.showRuntimeMenu)
+
+        preferences_menu.addAction(runtimeMultiplierAction)
+        runtimeMultiplierAction.triggered.connect(self.showRuntimeMultiplierMenu)
+
+        preferences_menu.addAction(viewAction)
+        viewAction.triggered.connect(self.show_view_dialog)
+
+        layout.setMenuBar(menubar)
 
         title_label = QLabel("C++ Code:", self)
         layout.addWidget(title_label)
@@ -308,7 +330,7 @@ class CPPCheckerApp(QWidget):
 
         self.setLayout(layout)
         self.setGeometry(100, 100, 600, 400)
-        self.setWindowTitle('Judgee 0.3')
+        self.setWindowTitle('Judgee' + ' v' + VERSION)
         self.show()
 
     @pyqtSlot()
@@ -340,7 +362,7 @@ class CPPCheckerApp(QWidget):
         
         try:
             start_time = time.time()
-            result = subprocess.run(command, shell=True, timeout=10, check=True)
+            result = subprocess.run(command, shell=True, timeout=RUNTIME, check=True)
             end_time = time.time()
             with open('temp.out', 'r') as f:
                 output = f.read()
@@ -353,7 +375,7 @@ class CPPCheckerApp(QWidget):
         with open(out_file, 'r') as f:
             expected_output = f.read()
 
-        elapsed_time = end_time - start_time
+        elapsed_time = (end_time - start_time) * RUNTIME_MULTIPLIER
         if output == expected_output:
             self.showResult('Passed', f'{elapsed_time:.2f}s')
         else:
@@ -368,7 +390,11 @@ class CPPCheckerApp(QWidget):
         if not folder_path:
             self.showError("Error: Please select a test folder.")
             return
-        
+
+        if not mingw_path:
+            self.showError("Error: Please select a MinGW path.")
+            return
+
         # Save the CPP code to a temporary file
         with open('temp.cpp', 'w') as f:
             f.write(cpp_code)
@@ -378,42 +404,58 @@ class CPPCheckerApp(QWidget):
         # Compile the C++ code first
         compile_command = f'"{mingw_path}/g++.exe" -o temp.exe temp.cpp'
         try:
-            subprocess.run(compile_command, shell=True, timeout=10, check=True)
+            subprocess.run(compile_command, shell=True, timeout=5, check=True)
         except subprocess.CalledProcessError:
             print("Compilation failed.")
+            self.result_table.setRowCount(0)
+            self.showError("Compilation failed.")
             return
 
-        for file in os.listdir(folder_path):
-            if file.endswith(".in"):
-                test_number = file.split('.')[0]
-                in_file = f'{folder_path}/{test_number}.in'
-                out_file = f'{folder_path}/{test_number}.out'
-
-                # Run the compiled executable with the input file & get the output
-                command = f'temp.exe < "{in_file}" > temp.out'
-                print(command)
-                try:
-                    start_time = time.time()
-                    result = subprocess.run(command, shell=True, timeout=10, check=True)
-                    end_time = time.time()
-                    with open('temp.out', 'r') as f:
-                        output = f.read()
-                    print(f'Test {test_number}: {output}')
-                except subprocess.TimeoutExpired:
-                    test_results.append({'Test No.': test_number, 'Result': 'Failed', 'Time Taken': 'Timeout'})
-                    continue
-
-                # Compare the output to the expected output
-                with open(out_file, 'r') as f:
-                    expected_output = f.read().strip()
-
-                elapsed_time = end_time - start_time
-                if output == expected_output:
-                    test_results.append({'Test No.': test_number, 'Result': 'Passed', 'Time Taken': f'{elapsed_time:.2f}s'})
-                else:
-                    test_results.append({'Test No.': test_number, 'Result': 'Failed', 'Time Taken': f'{elapsed_time:.2f}s'})
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(self.run_test, file, folder_path): file for file in os.listdir(folder_path) if file.endswith(".in")}
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                test_results.append(result)
 
         self.updateTable(test_results)
+
+    def run_test(self, file, folder_path):
+        test_number = file.split('.')[0]
+        in_file = f'{folder_path}/{test_number}.in'
+        out_file = f'{folder_path}/{test_number}.ok'
+        temp_out_file = f'temp_{test_number}.out'  # unique output file for each test
+
+        # Run the compiled executable with the input file & get the output
+        command = f'temp.exe < "{in_file}" > "{temp_out_file}"'
+        try:
+            start_time = time.time()
+            result = subprocess.run(command, shell=True, timeout=RUNTIME+0.5, check=True)
+            end_time = time.time()
+            with open(temp_out_file, 'r') as f:
+                output = f.read()
+        except subprocess.TimeoutExpired:
+            return {'Test No.': test_number, 'Result': 'Failed', 'Time Taken': 'Timeout: + >0.5s'}
+        except subprocess.CalledProcessError:
+            return {'Test No.': test_number, 'Result': 'Failed', 'Time Taken': 'Returned non-zero exit status'}
+        except Exception as e:
+            return {'Test No.': test_number, 'Result': 'Failed', 'Time Taken': 'Unknown Error: ' + str(e)}
+
+        # Compare the output to the expected output
+        with open(out_file, 'r') as f:
+            expected_output = f.read()
+
+        # Delete the temporary output file
+        os.remove(temp_out_file)
+
+        elapsed_time = (end_time - start_time) * RUNTIME_MULTIPLIER
+        if elapsed_time > RUNTIME:
+            return {'Test No.': test_number, 'Result': 'Failed', 'Time Taken': f'Timeout: +{elapsed_time - RUNTIME:.2f}s'}
+        if output == expected_output:
+            return {'Test No.': test_number, 'Result': 'Passed', 'Time Taken': f'{elapsed_time:.2f}s'}
+        else:
+            return {'Test No.': test_number, 'Result': 'Failed', 'Time Taken': f'{elapsed_time:.2f}s'}
+        
+        
     
     def updateTable(self, test_results):
         self.result_table.setRowCount(len(test_results))
@@ -430,6 +472,118 @@ class CPPCheckerApp(QWidget):
                 self.result_table.item(i, 0).setBackground(QColor(255, 0, 0))
                 self.result_table.item(i, 1).setBackground(QColor(255, 0, 0))
                 self.result_table.item(i, 2).setBackground(QColor(255, 0, 0))
+
+        self.result_table.sortItems(0)
+
+    """
+    Changes the max timeout for each test case
+    self - CPPCheckerApp
+    """
+    def showRuntimeMenu(self):
+        self.runtime_window = QDialog(self)
+        self.runtime_window.setWindowTitle("Runtime")
+        self.runtime_window.setWindowModality(Qt.ApplicationModal)
+        self.runtime_window.resize(300, 100)
+
+        self.runtime_layout = QVBoxLayout()
+
+        self.runtime_label = QLabel("Runtime (seconds):", self)
+        self.runtime_layout.addWidget(self.runtime_label)
+
+        self.runtime_entry = QLineEdit(self)
+        self.runtime_layout.addWidget(self.runtime_entry)
+
+        self.runtime_button = QPushButton("Set", self)
+        self.runtime_button.clicked.connect(self.setRuntime)
+        self.runtime_layout.addWidget(self.runtime_button)
+
+        self.runtime_window.setLayout(self.runtime_layout)
+        self.runtime_window.show()
+
+
+    """
+    Sets the runtime global variable
+    self - CPPCheckerApp
+    """
+    def setRuntime(self):
+        global RUNTIME
+        try:
+            float(self.runtime_entry.text())
+        except ValueError:
+            self.showError("Error: Please enter a valid number.")
+            return
+        
+        RUNTIME = float(self.runtime_entry.text())
+        self.runtime_window.close()
+
+    """
+    Changes the runtime multiplier for each test case
+    self - CPPCheckerApp
+    """
+    def showRuntimeMultiplierMenu(self):
+        self.runtime_multiplier_window = QDialog(self)
+        self.runtime_multiplier_window.setWindowTitle("Runtime Multiplier")
+        self.runtime_multiplier_window.setWindowModality(Qt.ApplicationModal)
+        self.runtime_multiplier_window.resize(300, 100)
+
+        self.runtime_multiplier_layout = QVBoxLayout()
+
+        self.runtime_multiplier_label = QLabel("Runtime Multiplier:", self)
+        self.runtime_multiplier_layout.addWidget(self.runtime_multiplier_label)
+
+        self.runtime_multiplier_entry = QLineEdit(self)
+        self.runtime_multiplier_layout.addWidget(self.runtime_multiplier_entry)
+
+        self.runtime_multiplier_button = QPushButton("Set", self)
+        self.runtime_multiplier_button.clicked.connect(self.setRuntimeMultiplier)
+        self.runtime_multiplier_layout.addWidget(self.runtime_multiplier_button)
+
+        self.runtime_multiplier_window.setLayout(self.runtime_multiplier_layout)
+        self.runtime_multiplier_window.show()
+
+
+    """
+    Sets the runtime multiplier global variable
+    self - CPPCheckerApp
+    """
+    def setRuntimeMultiplier(self):
+        global RUNTIME_MULTIPLIER
+        try:
+            float(self.runtime_multiplier_entry.text())
+        except ValueError:
+            self.showError("Error: Please enter a valid number.")
+            return
+        
+        RUNTIME_MULTIPLIER = float(self.runtime_multiplier_entry.text())
+        self.runtime_multiplier_window.close()
+
+
+    """
+    Shows the preferences that youve set
+    self - CPPCheckerApp
+    """
+    def show_view_dialog(self):
+        self.view_window = QDialog(self)
+        self.view_window.setWindowTitle("View")
+        self.view_window.setWindowModality(Qt.ApplicationModal)
+        self.view_window.resize(300, 100)
+
+        self.view_layout = QVBoxLayout()
+
+        self.view_label = QLabel("Preferences:", self)
+        self.view_layout.addWidget(self.view_label)
+
+        self.setRuntime_label = QLabel(f"Runtime: {RUNTIME}s", self)
+        self.view_layout.addWidget(self.setRuntime_label)
+
+        self.setRuntimeMultiplier_label = QLabel(f"Runtime Multiplier: {RUNTIME_MULTIPLIER}x", self)
+        self.view_layout.addWidget(self.setRuntimeMultiplier_label)
+
+        self.version_label = QLabel(f"Version: {VERSION}", self)
+        self.view_layout.addWidget(self.version_label)
+
+        self.view_window.setLayout(self.view_layout)
+        self.view_window.show()
     
     @pyqtSlot()
     def browseMingw(self):
