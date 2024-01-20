@@ -1,19 +1,35 @@
-import sys
-from PyQt5.QtWidgets import *
-from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextBlockUserData, QColor, QFont, QPainter, QTextFormat
-from PyQt5.QtCore import Qt, pyqtSlot, QRegularExpression, QRect
-from PyQt5 import QtGui
-import subprocess
-import time
-import os
-import qdarktheme
-from concurrent.futures import ThreadPoolExecutor
-import concurrent.futures
+try:
+    import sys
+    from PyQt5.QtWidgets import *
+    from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextBlockUserData, QColor, QFont, QPainter, QTextFormat
+    from PyQt5.QtCore import Qt, pyqtSlot, QRegularExpression, QRect
+    from PyQt5 import QtGui
+    import subprocess
+    import time
+    import os
+    import qdarktheme
+    from concurrent.futures import ThreadPoolExecutor
+    import concurrent.futures
+except ImportError:
+    import os
+    os.system('pip install -r requirements.txt')
+    import sys
+    from PyQt5.QtWidgets import *
+    from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextBlockUserData, QColor, QFont, QPainter, QTextFormat
+    from PyQt5.QtCore import Qt, pyqtSlot, QRegularExpression, QRect
+    from PyQt5 import QtGui
+    import subprocess
+    import time
+    import os
+    import qdarktheme
+    from concurrent.futures import ThreadPoolExecutor
+    import concurrent.futures
+
 
 RUNTIME = 2.0 # 2s by default
 RUNTIME_MULTIPLIER = 1.0 # 1x by default
 
-VERSION = "0.5"
+VERSION = "0.6"
  
 class QCodeEditor(QPlainTextEdit):
     class NumberBar(QWidget):
@@ -153,7 +169,10 @@ class CppSyntaxHighlighter(QSyntaxHighlighter):
         self.stringFormat.setForeground(QColor("#CE9178"))
 
         self.directiveFormat = QTextCharFormat()
-        self.directiveFormat.setForeground(QColor("#D4D4D4"))
+        self.directiveFormat.setForeground(QColor("#59b923"))
+
+        self.commentFormat = QTextCharFormat()
+        self.commentFormat.setForeground(QColor("#93c47d"))
 
         keywords = [
             "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor",
@@ -177,12 +196,11 @@ class CppSyntaxHighlighter(QSyntaxHighlighter):
             (r'\b\d+\b', 0, self.numberFormat),  # Match numbers
             (r'"[^"]*"', 0, self.stringFormat),   # Match strings
             (r'#\w+', 0, self.directiveFormat),   # Match preprocessor directives
+            (r'//.*', 0, self.commentFormat),   # Match single line comments
         ]
 
         self.multiLineCommentFormat = QTextCharFormat()
-        self.multiLineCommentFormat.setForeground(QColor("#57A64A"))
-
-        
+        self.multiLineCommentFormat.setForeground(QColor("#57A64A"))   
 
     def highlightBlock(self, text):
         for pattern, nth, format in self.rules:
@@ -611,6 +629,7 @@ class CPPCheckerApp(QWidget):
                 break
             else:
                 self.showError("Could not auto-find MinGW. Please select the path manually.")
+                return
 
 
     @pyqtSlot()
